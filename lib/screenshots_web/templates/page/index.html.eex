@@ -1,17 +1,18 @@
 <%= for {name, path} <- @pages do %>
-  <div class="result">
-    <h2><%= name %></h2>
-    <p><%= path %></p>
+  <div class="result" id="<%= name %>">
+    <h2 class="result__name"><%= name %></h2>
+    <p>
+      <b>Path:</b>
+      <%= path %>
+    </p>
     <div class="images">
-      <div class="image image--test">
-        <h3>Test</h3>
-        <%= img_tag ScreenshotsWeb.Endpoint.static_path("/test/" <> name <> ".png") %>
-      </div>
-      <div class="image image--ref">
+      <div class="image image--ref image--loading" id="<%= name %>--ref">
         <h3>Reference</h3>
-        <%= img_tag ScreenshotsWeb.Endpoint.static_path("/ref/" <> name <> ".png") %>
       </div>
-      <div class="image image--diff">
+      <div class="image image--test image--loading" id="<%= name %>--test">
+        <h3>Test</h3>
+      </div>
+      <div class="image image--diff image--loading" id="<%= name %>--diff">
         <h3>Diff</h3>
       </div>
     </div>

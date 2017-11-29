@@ -6,10 +6,39 @@
   }
 }
 
+.result {
+  padding-bottom: 5rem;
+  padding-top: 5rem;
+}
+
+.result__name {
+  border-top: 1px solid #ccc;
+}
+
 .images {
   display: flex;
+  justify-content: space-between;
 }
 
 .image {
   flex: 1;
+}
+
+.image img {
+  outline: 1px solid #ccc;
+}
+
+.image--loading,
+.image--passed {
+  height: 20rem;
+  flex: 0 0 31%;
+}
+
+.image--loading {
+  background-color: #ccc;
+}
+
+.image--passed {
+  background-color: green;
+  content: "passed!"
 }

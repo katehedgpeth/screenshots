@@ -3,6 +3,7 @@ defmodule ScreenshotsWeb.UserSocket do
 
   ## Channels
   # channel "room:*", ScreenshotsWeb.RoomChannel
+  channel "screenshots:test", ScreenshotsWeb.Channel
 
   ## Transports
   transport :websocket, Phoenix.Transports.WebSocket
