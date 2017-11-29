@@ -1,0 +1,15 @@
+/* This file is for your main application css. */
+@media (min-width: 800px) {
+  .main {
+    margin: 0 auto;
+    max-width: 90%;
+  }
+}
+
+.images {
+  display: flex;
+}
+
+.image {
+  flex: 1;
+}
