@@ -1,15 +1,28 @@
 defmodule ScreenshotsWeb.PageController do
   use ScreenshotsWeb, :controller
 
-  @pages :screenshots
-         |> Application.app_dir("priv")
-         |> Path.join("pages.json")
-         |> File.read!()
-         |> Poison.decode!()
-
-  def pages, do: @pages
+  def pages do
+    case System.get_env("SCREENSHOT_PATH") do
+      nil ->
+        :screenshots
+        |> Application.app_dir("priv")
+        |> Path.join("pages.json")
+        |> File.read!()
+        |> Poison.decode!()
+      path ->
+        name = System.get_env("SCREENSHOT_NAME") || default_name(path)
+        %{name => path}
+    end
+  end
 
   def index(conn, _params) do
-    render conn, "index.html", pages: @pages
+    render conn, "index.html", pages: pages()
+  end
+
+  defp default_name(path) do
+    path
+    |> String.replace("/", "__")
+    |> String.replace("?", "__")
+    |> String.replace("=", "-")
   end
 end

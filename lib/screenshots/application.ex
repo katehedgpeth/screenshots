@@ -10,6 +10,7 @@ defmodule Screenshots.Application do
     children = [
       # Start the endpoint when the application starts
       supervisor(ScreenshotsWeb.Endpoint, []),
+      supervisor(Screenshots.Runner, [])
       # Start your own worker by calling: Screenshots.Worker.start_link(arg1, arg2, arg3)
       # worker(Screenshots.Worker, [arg1, arg2, arg3]),
     ]

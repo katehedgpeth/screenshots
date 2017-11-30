@@ -15,6 +15,7 @@ let channel = socket.channel("screenshots:test", {})
 
 channel.on("test_image", handle_image("test"));
 channel.on("ref_image", handle_image("ref"));
+channel.on("error", handle_error);
 
 channel.join()
   .receive("ok", resp => { console.log("Joined successfully", resp) })
@@ -35,4 +36,7 @@ function handle_image(type) {
   }
 }
 
+function handle_error(data) {
+  console.log("error", data)
+}
 export default socket
