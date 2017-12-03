@@ -3,22 +3,30 @@ defmodule Screenshots.Runner do
   alias Wallaby.{Browser, Query}
 
   @screenshot_dir Application.app_dir(:screenshots, "priv/screenshots")
+  @breakpoints %{
+    xs_narrow: {320, 480},
+    xs_wide: {543, 713},
+    sm_narrow: {544, 714},
+    sm_wide: {799, 1023},
+    md_lg: {800, 1024},
+    xxl: {1236, 1600}
+  }
 
   def start_link() do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
   def init(_) do
-    {:ok, %{status: :idle, pages: ScreenshotsWeb.PageController.pages()}}
+    {:ok, %{status: :idle, pages: ScreenshotsWeb.PageController.pages(), session: nil}}
   end
 
   def handle_cast(:start, %{status: :idle, pages: pages} = state) do
     IO.inspect "starting up Screenshots.Runner"
-    setup()
+    {:ok, session} = setup()
     pages
     |> Enum.with_index()
     |> Enum.map(&start_page/1)
-    {:noreply, %{state | status: :running}}
+    {:noreply, %{state | status: :running, session: session}}
   end
   def handle_cast(:start, %{status: :running} = state) do
     IO.inspect state
@@ -35,36 +43,55 @@ defmodule Screenshots.Runner do
   end
 
   def handle_info({:start_page, {name, path}}, %{current_page: _} = state) do
-    IO.inspect "not starting b/c page is running"
     Process.send_after self(), {:start_page, {name, path}}, 2_000
     {:noreply, state}
   end
-  def handle_info({:start_page, {name, path}}, %{status: {:error, error}} = state) do
-    IO.inspect {{name, path}, error}, label: "ignoring request to start page due to error"
-    {:noreply, state}
+  def handle_info({:start_page, {name, path}}, %{status: {:error, error}, session: %Wallaby.Session{} = session} = state) do
+    IO.inspect {{name, path}, error}, label: "shutting down Wallaby due to error"
+    :ok = Wallaby.end_session(session)
+    {:noreply, %{state | session: nil}}
   end
-  def handle_info({:start_page, {name, path}}, state) do
-    send self(), {:take_screenshots, {name, path}}
+  def handle_info({:start_page, {name, path}}, %{session: %Wallaby.Session{}} = state) do
+    send self(), {:take_screenshot, {name, path, :ref}}
     {:noreply, Map.put(state, :current_page, {name, path})}
   end
-  def handle_info({:take_screenshots, {name, path}}, state) do
-    take_screenshots({name, path})
+  def handle_info({:start_page, _}, state) do
+    {:noreply, %{state | status: :idle}}
+  end
+  def handle_info({:take_screenshot, {name, path, type}}, state) do
+    case {take_screenshot(state.session, name, path, type), type} do
+      {{:ok, %Wallaby.Session{}}, :ref} ->
+        send self(), {:take_screenshot, {name, path, :test}}
+      {{:ok, %Wallaby.Session{}}, :test} ->
+        send self(), {:page_finished, name, :ok}
+      {{:error, error}, _} ->
+        send self(), {:page_finished, name, {:error, error}}
+    end
     {:noreply, state}
   end
   def handle_info({:page_finished, page_name, result}, state) do
     {:noreply, state
                |> Map.delete(:current_page)
                |> Map.put(:pages, Map.delete(state.pages, page_name))
-               |> update_status(result)}
+               |> update_state(result)}
   end
 
-  defp update_status(%{} = state, result) do
+  defp update_state(%{session: %Wallaby.Session{}} = state, result) do
     case {result, state.pages |> Map.keys() |> length} do
-      {:ok, 0} -> %{state | status: :idle}
+      {:ok, 0} ->
+        :ok = Wallaby.end_session(state.session)
+        Application.stop(:wallaby)
+        %{state | status: :idle, session: nil}
       {:ok, _} -> state
-      {{:error, %{error: %{message: "There was an uncaught javascript error" <> _}}}, 0} -> %{state | status: :idle}
+      {{:error, %{error: %{message: "There was an uncaught javascript error" <> _}}}, 0} ->
+        :ok = Wallaby.end_session(state.session)
+        Application.stop(:wallaby)
+        %{state | status: :idle, session: nil}
       {{:error, %{error: %{message: "There was an uncaught javascript error" <> _}}}, _} -> state
-      {{:error, error}, _} -> %{state | status: {:error, error}}
+      {{:error, error}, _} ->
+        :ok = Wallaby.end_session(state.session)
+        Application.stop(:wallaby)
+        %{state | status: {:error, error}, session: nil}
     end
   end
 
@@ -73,29 +100,10 @@ defmodule Screenshots.Runner do
     File.mkdir_p!(Path.join([@screenshot_dir, "test"]))
     File.mkdir_p!(Path.join([@screenshot_dir, "ref"]))
     {:ok, _} = Application.ensure_all_started(:wallaby)
+    {:ok, %Wallaby.Session{}} = Wallaby.start_session()
   end
 
-  defp take_screenshots({name, opts}) do
-    IO.inspect {name, opts}, label: "starting screenshots for"
-    case do_take_screenshots(name, opts) do
-      {:ok, %Wallaby.Session{} = session} ->
-        Wallaby.end_session(session)
-        send self(), {:page_finished, name, :ok}
-      {:error, error} ->
-        send self(), {:page_finished, name, {:error, error}}
-    end
-  end
-
-  defp do_take_screenshots(name, opts) do
-    Wallaby.start_session()
-    |> take_screenshot({name, opts}, :ref)
-    |> take_screenshot({name, opts}, :test)
-  end
-
-  defp take_screenshot({:error, error}, _, _) do
-    {:error, error}
-  end
-  defp take_screenshot({:ok, %Wallaby.Session{} = session}, {name, path}, type) do
+  defp take_screenshot(%Wallaby.Session{} = session, name, path, type) do
     url = type
           |> base_url()
           |> Path.join(path)
@@ -105,7 +113,6 @@ defmodule Screenshots.Runner do
     |> do_take_screenshot(name, type, path)
   rescue
     error ->
-      Wallaby.end_session(session)
       {:error, %{name: name, path: path, type: type, error: error}}
   end
 
@@ -129,8 +136,13 @@ defmodule Screenshots.Runner do
   end
   defp do_take_screenshot(%Wallaby.Session{} = session, name, type, path) do
     Application.put_env(:wallaby, :screenshot_dir, screenshot_dir(type))
-    Browser.take_screenshot(session, name: name)
-    ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "#{type}_image", %{name: name}
+    for {breakpoint, {width, height}} <- @breakpoints do
+      file_name = "#{name}_#{breakpoint}"
+      session
+      |> Browser.resize_window(width, height)
+      |> Browser.take_screenshot(name: file_name)
+      ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "#{type}_image", %{page_name: name, name: file_name, breakpoint: breakpoint}
+    end
     {:ok, session}
   rescue
     error ->
