@@ -36,6 +36,20 @@ function handle_image(type) {
 
 function handle_error(data) {
   console.log("error", data)
+  if (data.name && data.type) {
+    const img_container = document.getElementById(data.name + "--" + data.type);
+    img_container.classList.remove("image--loading");
+    img_container.classList.add("image--error");
+    if (data.error.message) {
+      img_container.textContent = data.error.message
+    } else if (data.error) {
+      img_container.textContent = data.error
+    } else {
+      img_container.textContent = data
+    }
+  } else {
+    console.error("expected error data to have :name and :type keys")
+  }
 }
 
 export function toggle_image_width(e) {

@@ -15,7 +15,6 @@ export function run_diff(img_name) {
         diff_image.src = data.getImageDataUrl()
         diff_container.appendChild(diff_image);
       } else {
-        console.log("passed", img_name, data);
         diff_container.classList.add("image--passed");
       }
     });
