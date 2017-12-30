@@ -17,64 +17,74 @@ defmodule Screenshots.Runner do
   end
 
   def init(_) do
-    {:ok, %{status: :idle, pages: ScreenshotsWeb.PageController.pages(), session: nil}}
+    send self(), :start
+    {:ok, %{pages: ScreenshotsWeb.PageController.pages(), tasks: []}}
   end
 
-  def handle_cast(:start, %{status: :idle, pages: pages} = state) do
-    IO.inspect "starting up Screenshots.Runner"
-    {:ok, session} = setup()
-    pages
-    |> Enum.with_index()
-    |> Enum.map(&start_page/1)
-    {:noreply, %{state | status: :running, session: session}}
-  end
-  def handle_cast(:start, %{status: :running} = state) do
-    IO.inspect state
-    {:noreply, state}
-  end
-  def handle_cast(:start, state) do
-    IO.inspect state
-    {:noreply, state}
-  end
-
-  defp start_page({{name, path}, idx}) do
-    Process.send_after self(), {:start_page, {name, path}}, idx * 2
-    {name, path}
-  end
-
-  def handle_info({:start_page, {name, path}}, %{current_page: _} = state) do
-    Process.send_after self(), {:start_page, {name, path}}, 2_000
-    {:noreply, state}
-  end
-  def handle_info({:start_page, {name, path}}, %{status: {:error, error}, session: %Wallaby.Session{} = session} = state) do
-    IO.inspect {{name, path}, error}, label: "shutting down Wallaby due to error"
-    :ok = Wallaby.end_session(session)
-    {:noreply, %{state | session: nil}}
-  end
-  def handle_info({:start_page, {name, path}}, %{session: %Wallaby.Session{}} = state) do
-    send self(), {:take_screenshot, {name, path, :ref}}
-    {:noreply, Map.put(state, :current_page, {name, path})}
-  end
-  def handle_info({:start_page, _}, state) do
-    {:noreply, %{state | status: :idle}}
-  end
-  def handle_info({:take_screenshot, {name, path, type}}, state) do
-    case {take_screenshot(state.session, name, path, type), type} do
-      {{:ok, %Wallaby.Session{}}, :ref} ->
-        send self(), {:take_screenshot, {name, path, :test}}
-      {{:ok, %Wallaby.Session{}}, :test} ->
-        send self(), {:page_finished, name, :ok}
-      {{:error, error}, _} ->
-        send self(), {:page_finished, name, {:error, error}}
+  def start_page({name, path}) do
+    case Enum.reduce([:ref, :test], :ok, &check_url(&1, &2, path)) do
+      :ok -> do_start_page(name, path)
+      error -> Task.async(fn -> error end)
     end
+  end
+
+  defp do_start_page(name, path) do
+    Task.async(__MODULE__, :take_screenshots, [name, path])
+  end
+
+  def handle_info(:start, %{tasks: [], pages: pages} = state) do
+    IO.inspect "starting Screenshots.Runner"
+    {:ok, _} = setup()
+    {:noreply, %{state | tasks: Enum.map(pages, &start_page/1)}}
+  end
+  def handle_info(:start, state) do
+    IO.inspect(state, label: "unfinished Screenshots.Runner tasks")
+    with {name, _path} <- state.pages,
+         {breakpoint, _dimensions} <- @breakpoints,
+         type <- [:ref, :test]
+    do send_screenshot(name, type, breakpoint) end
     {:noreply, state}
   end
-  def handle_info({:page_finished, page_name, result}, state) do
-    {:noreply, state
-               |> Map.delete(:current_page)
-               |> Map.put(:pages, Map.delete(state.pages, page_name))
-               |> update_state(result)}
+  def handle_info({ref, :ok}, state) when is_reference(ref) do
+    {:noreply, state}
   end
+  def handle_info({ref, {:error, %{error: %{message: "There was an uncaught javascript error"}}} = error}, state) when is_reference(ref) do
+    IO.inspect {:error, error}, label: "task error"
+    {:noreply, state}
+  end
+  def handle_info({ref, {:error, error}}, state) when is_reference(ref) do
+    IO.inspect {:error, error}, label: "task error"
+    Enum.map(state.tasks, &Task.shutdown/1)
+    Application.stop(:wallaby)
+    {:noreply, state}
+  end
+  def handle_info({:DOWN, ref, :process, _pid, :normal}, state) do
+    {:noreply, %{state | tasks: drop_task(state.tasks, ref, [])}}
+  end
+
+  defp check_url(type, :ok, path) do
+    type
+    |> build_url(path)
+    |> HTTPoison.get()
+    |> do_check_url()
+  end
+  defp check_url(_, error, _), do: error
+
+  defp do_check_url({:error, error}), do: {:error, error}
+  defp do_check_url({:ok, %HTTPoison.Response{status_code: 500} = response}), do: {:error, response}
+  defp do_check_url({:ok, _}), do: :ok
+
+  def take_screenshots(name, path) do
+    case take_screenshot(name, path, :ref) do
+      :ok -> take_screenshot(name, path, :test)
+      error -> error
+    end
+  end
+
+  defp drop_task([], _ref, acc), do: acc
+  defp drop_task([%Task{ref: ref}], ref, acc), do: acc
+  defp drop_task([%Task{ref: ref} | rest], ref, acc), do: rest ++ acc
+  defp drop_task([%Task{} = task | rest], ref, acc), do: drop_task(rest, ref, [task | acc])
 
   defp update_state(%{session: %Wallaby.Session{}} = state, result) do
     case {result, state.pages |> Map.keys() |> length} do
@@ -100,24 +110,24 @@ defmodule Screenshots.Runner do
     File.mkdir_p!(Path.join([@screenshot_dir, "test"]))
     File.mkdir_p!(Path.join([@screenshot_dir, "ref"]))
     {:ok, _} = Application.ensure_all_started(:wallaby)
-    {:ok, %Wallaby.Session{}} = Wallaby.start_session()
   end
 
-  defp take_screenshot(%Wallaby.Session{} = session, name, path, type) do
-    url = type
-          |> base_url()
-          |> Path.join(path)
+  defp take_screenshot(name, path, type) do
+    {:ok, session} = Wallaby.start_session()
     __MODULE__
-    |> Task.async(:ensure_page_loaded, [session, name, url, type])
-    |> Task.await(30_000)
+    |> Task.async(:ensure_page_loaded, [session, name, build_url(type, path), type])
+    |> Task.yield(30_000)
     |> do_take_screenshot(name, type, path)
-  rescue
-    error ->
-      {:error, %{name: name, path: path, type: type, error: error}}
   end
 
   defp base_url(:ref), do: "https://dev.mbtace.com"
   defp base_url(:test), do: "http://localhost:4001"
+
+  defp build_url(type, path) do
+    type
+    |> base_url()
+    |> Path.join(path)
+  end
 
   def ensure_page_loaded(session, name, "http" <> _ = url, type) do
     session = Browser.visit(session, url)
@@ -126,29 +136,47 @@ defmodule Screenshots.Runner do
     else
       ensure_page_loaded(session, name, url, type)
     end
-  rescue
-    error -> {:error, %{name: name, path: url, type: type, error: error}}
   end
 
-  defp do_take_screenshot({:error, error}, _name, _type, _path) do
-    ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "error", error
-    {:error, error}
+  defp do_take_screenshot(nil, name, type, path) do
+    handle_error(name, path, type, :timeout)
   end
-  defp do_take_screenshot(%Wallaby.Session{} = session, name, type, path) do
+  defp do_take_screenshot({:ok, %Wallaby.Session{} = session}, name, type, _path) do
     Application.put_env(:wallaby, :screenshot_dir, screenshot_dir(type))
     for {breakpoint, {width, height}} <- @breakpoints do
-      file_name = "#{name}_#{breakpoint}"
       session
       |> Browser.resize_window(width, height)
-      |> Browser.take_screenshot(name: file_name)
-      ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "#{type}_image", %{page_name: name, name: file_name, breakpoint: breakpoint}
+      |> Browser.take_screenshot(name: file_name(name, breakpoint, false))
+      send_screenshot(name, breakpoint, type)
     end
-    {:ok, session}
-  rescue
-    error ->
-      info = %{name: name, path: path, type: type, error: error}
-      ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "error", info
-      {:error, info}
+    Wallaby.end_session(session)
+  end
+
+  defp file_name(name, breakpoint, add_ext? \\ true)
+  defp file_name(name, breakpoint, false), do: IO.iodata_to_binary([name,"_", Atom.to_string(breakpoint)])
+  defp file_name(name, breakpoint, true), do: IO.iodata_to_binary([file_name(name, breakpoint, false), ".png"])
+
+  defp send_screenshot(name, breakpoint, type) do
+    name
+    |> file_name(breakpoint)
+    |> curry(Path, :join, [screenshot_dir(type)])
+    |> File.stat()
+    |> do_send_screenshot(name, breakpoint, type)
+  end
+
+  def curry(last_arg, module, func, args)
+  when is_atom(module)
+  and is_atom(func)
+  and is_list(args), do: apply(module, func, Enum.concat(args, [last_arg]))
+
+  defp do_send_screenshot({:ok, _}, name, breakpoint, type) do
+    ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "#{type}_image", %{page_name: name, name: file_name(name, breakpoint, false), breakpoint: breakpoint}
+  end
+
+  defp handle_error(name, path, type, error) do
+    info = %{name: name, path: path, type: type, error: error}
+    ScreenshotsWeb.Endpoint.broadcast "screenshots:test", "error", info
+    {:error, info}
   end
 
   defp screenshot_dir(type) do
