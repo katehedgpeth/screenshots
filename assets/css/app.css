@@ -17,15 +17,19 @@
 
 .images {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
 }
 
 .image {
-  flex: 1;
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0%;
 }
 
 .image img {
   outline: 1px solid #ccc;
+  max-width: 100%;
 }
 
 .image--loading,

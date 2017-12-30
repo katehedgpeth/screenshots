@@ -26,6 +26,8 @@ function handle_image(type) {
     try {
       const img_container = document.getElementById(data.name + "--" + type);
       img_container.classList.remove("image--loading");
+      img_container.style.flexGrow = "1";
+      img_container.addEventListener("click", toggle_image_width);
       const img = new Image();
       img.src = type + "/" + data.name + ".png"
       img_container.append(img);
@@ -38,5 +40,11 @@ function handle_image(type) {
 
 function handle_error(data) {
   console.log("error", data)
+}
+
+export function toggle_image_width(e) {
+  console.log("image clicked", e.currentTarget.style.flexGrow);
+  e.currentTarget.style.flexGrow = e.currentTarget.style.flexGrow == "1" ? "4" : "1";
+  return false;
 }
 export default socket
