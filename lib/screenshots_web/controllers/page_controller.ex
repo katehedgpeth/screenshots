@@ -10,22 +10,11 @@ defmodule ScreenshotsWeb.PageController do
     xxl: {1236, 1600}
   ]
 
-  def pages do
-    case System.get_env("SCREENSHOT_PATH") do
-      nil ->
-        :screenshots
-        |> Application.app_dir("priv")
-        |> Path.join("pages.json")
-        |> File.read!()
-        |> Poison.decode!()
-      path ->
-        name = System.get_env("SCREENSHOT_NAME") || default_name(path)
-        %{name => path}
-    end
-  end
-
   def index(conn, _params) do
-    render conn, "index.html", pages: pages(), breakpoints: @breakpoints
+    case GenServer.whereis(Screenshots.Runner) do
+      nil -> render conn, "error"
+        _ -> render conn, "index.html"
+    end
   end
 
   defp default_name(path) do

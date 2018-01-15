@@ -11,6 +11,14 @@
   padding-top: 5rem;
 }
 
+.result--passed .breakpoint--passed .image { display: none; }
+
+.result--error .breakpoint--passed,
+.result--failed .breakpoint--passed { display: none; }
+
+.breakpoint--error .breakpoint__name,
+.breakpoint--failed .breakpoint__name { background-color: #FF0000; }
+
 .result__name {
   border-top: 1px solid #ccc;
 }
@@ -38,11 +46,8 @@
   flex: 0 0 31%;
 }
 
-.image--loading {
-  background-color: #ccc;
-}
+.image--loading { background-color: #ccc; }
 
 .image--passed {
   background-color: green;
-  content: "passed!"
 }

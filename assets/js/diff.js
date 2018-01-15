@@ -10,12 +10,12 @@ export function run_diff(img_name) {
       diff_container.style.flexGrow = "1";
       diff_container.addEventListener("click", toggle_image_width);
       if (data.rawMisMatchPercentage > 0) {
-        console.log("FAILED", img_name, data);
-        var diff_image = new Image();
+        const diff_image = new Image();
         diff_image.src = data.getImageDataUrl()
         diff_container.appendChild(diff_image);
+        diff_container.parentNode.dispatchEvent(new CustomEvent("image_failed", {detail: data, bubbles: true}));
       } else {
-        diff_container.classList.add("image--passed");
+        diff_container.parentNode.dispatchEvent(new CustomEvent("image_passed", {detail: data, bubbles: true}));
       }
     });
   }

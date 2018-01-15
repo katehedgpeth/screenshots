@@ -1,13 +1,14 @@
-<%= for {name, path} <- @pages do %>
+<%= for {name, %{path: path}} <- GenServer.call(Screenshots.Runner, :pages) do %>
   <div class="result" id="<%= name %>">
     <h2 class="result__name"><%= name %></h2>
     <p>
       <b>Path:</b>
       <%= path %>
     </p>
-    <%= for {breakpoint, _} <- @breakpoints do %>
+    <%= for {breakpoint, _} <- GenServer.call(Screenshots.Runner, :breakpoints) do %>
       <div class="breakpoint" id="<%= name %>_<%= breakpoint %>">
         <h4 class="breakpoint__name"><%= breakpoint %></h4>
+        <div class="error"></div>
         <div class="images">
           <div class="image image--diff image--loading" id="<%= name %>_<%= breakpoint %>--diff">
             <h3>Diff</h3>
